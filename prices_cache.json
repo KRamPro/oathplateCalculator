@@ -1,8 +1,8 @@
 {
   "prices": {
-    "shale": 295,
-    "shard": 210100,
-    "sale": 98737858
+    "shale": 0,
+    "shard": 0,
+    "sale": 0
   },
-  "fetched_at": "2026-02-14T22:50:00.3870306-06:00"
+  "fetched_at": "0"
 }
