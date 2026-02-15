@@ -21,7 +21,6 @@ const (
 	cacheTTL  = 20 * time.Minute
 )
 
-// TODO: replace these with the real OSRS item IDs
 const (
 	itemIDShale = 30848
 	itemIDShard = 30765
