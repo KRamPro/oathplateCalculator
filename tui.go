@@ -10,6 +10,39 @@ import (
 	"github.com/rivo/tview"
 )
 
+const oathplateHelmetArt = `
+        @adJOJJcJJOJ                        
+     aaMMMaaaaaddOJc|                      
+     J@@@@aMaaaaaaddOcc @Mjj|              
+      MOOddaaMaaaddadddaOadJadj            
+      j|   @OadMaaaaddJadcOdjc|            
+            M OdaaaaadO@cO@@cJ-            
+               MaaaaaaO@ac@@JJ{            
+              cOaddaaad@@|@@cO{        >I  
+                 caaMaaM@Md@M@@        |"  
+          I|        a@@@@@@@@{        >c"  
+          {|{         |>-   "MM       jc   
+       |   dJ|I    >--|I  >I -@@{    j@O   
+       ||{{jaO|-I --ddOMJ I>I -@@d     a>  
+         JdaaMdOja-cdMdOaO     "ad@""> ""  
+          MMad{|{-{@MMMaJac|jj{>OcaJ>>>I-  
+         {cO@@@O|{-j@MdaMMc-{{{>|Od|I>I">" 
+          OdMaccc|{{a@dOOda{--{>-ddj">"|M> 
+             @@@ac{{cMMdddM@M{---Jac""|M@@O
+                @@O{{a@@@@@adaa-I{MO -M@J  
+                @@aj||I"{M@@@@@@M|Mdc@@d   
+                 @@OjddcI     -OM@@@c    I 
+                J{@@cMMdc@||>          "-- 
+               -jaM@a@@aJ@Occ{@>{{-I->c@@  
+             -|JacJd@@@@M@@c{d@J-|j{>-@O   
+             {j|-{jjjc@@@@@M|@@@j{|-I@@"   
+                 "{-c@@@@@@@a@@@@|{>@@@    
+                  >M@@@@@@@@@@@@@@|@@      
+                    adaM@@MMadJcjOj>       
+                     OOOJccjj{j>          
+
+`
+
 func RunTUI(initial AppState) error {
 	app := tview.NewApplication()
 
@@ -43,7 +76,25 @@ func RunTUI(initial AppState) error {
 
 	help := tview.NewTextView()
 	help.SetDynamicColors(true)
-	help.SetText("[yellow]Enter[white]: apply field | [yellow]F/L/S/Q[white]: fetch/load/save/quit")
+	help.SetText("Enter: apply field | F/L/S/Q: fetch/load/save/quit")
+	help.SetBackgroundColor(tcell.ColorBlack)
+
+	// --- art panel (this is the missing block you nuked) ---
+	art := tview.NewTextView()
+	art.SetBorder(true)
+	art.SetTitle("Oathplate Helmet")
+	art.SetBackgroundColor(tcell.ColorBlack)
+	art.SetTextColor(tcell.ColorWhite)
+	art.SetWrap(false)
+	art.SetScrollable(true)
+	art.SetDynamicColors(false)
+	art.SetText(oathplateHelmetArt)
+
+	// inputs/buttons continue here...
+
+	art.SetDynamicColors(false)
+	art.SetText(oathplateHelmetArt)
+
 	help.SetBackgroundColor(tcell.ColorBlack)
 
 	inShale := tview.NewInputField().SetLabel("Shale avg: ")
@@ -201,16 +252,22 @@ func RunTUI(initial AppState) error {
 	left.SetTitle("Inputs")
 
 	left.AddItem(help, 1, 0, false)
+
 	left.AddItem(inShale, 1, 0, true)
 	left.AddItem(inShard, 1, 0, false)
 	left.AddItem(inA1, 1, 0, false)
 	left.AddItem(inA2, 1, 0, false)
 	left.AddItem(inA3, 1, 0, false)
+
 	left.AddItem(tview.NewBox(), 1, 0, false) // spacer
+
 	left.AddItem(btnFetch, 1, 0, false)
 	left.AddItem(btnLoad, 1, 0, false)
 	left.AddItem(btnSave, 1, 0, false)
 	left.AddItem(btnQuit, 1, 0, false)
+
+	// Art lives in the leftover space.
+	left.AddItem(art, 0, 1, false)
 
 	body := tview.NewFlex()
 	body.AddItem(left, 0, 1, true)
