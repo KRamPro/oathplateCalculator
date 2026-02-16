@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,10 +16,8 @@ import (
 const (
 	shardsNeeded = 450
 	shaleNeeded  = 2520
-	taxRate      = 0.02
-
-	cacheFile = "prices_cache.json"
-	cacheTTL  = 20 * time.Minute
+	cacheFile    = "prices_cache.json"
+	cacheTTL     = 20 * time.Minute
 
 	version = "v1.0.0"
 )
@@ -29,9 +26,9 @@ const (
 	itemIDShale = 30848
 	itemIDShard = 30765
 
-	armorID1 = 30750 // Helmet
-	armorID2 = 30753 // Chest
-	armorID3 = 30756 // Legs
+	armorID1 = 30750 // Oathplate helmet
+	armorID2 = 30753 // Oathplate chestplate
+	armorID3 = 30756 // Oathplate legs
 )
 
 type PriceTriple struct {
@@ -71,159 +68,46 @@ type ArmorReport struct {
 	ItemID   int
 	Sale     PriceTriple
 	Cases    []ProfitCase
-	BestCase ProfitCase // best profit among cases
+	BestCase ProfitCase
 }
 
 type Report struct {
-	Version         string
-	Mode            string
-	FetchedAt       time.Time
-	CacheAge        time.Duration
-	CacheFresh      bool
-	IngredientCost  PriceTriple // cost at low/avg/high ingredient valuations
+	Version    string
+	Mode       string
+	FetchedAt  time.Time
+	CacheAge   time.Duration
+	CacheFresh bool
+
+	Shale PriceTriple
+	Shard PriceTriple
+
+	IngredientCost  PriceTriple
 	Armors          []ArmorReport
 	BestByAvgProfit ArmorReport
 	BestByHighSale  ArmorReport
 }
 
 func main() {
-	reader := bufio.NewReader(os.Stdin)
+	fmt.Printf("OathPlate Calculator %s\n", version)
 
-	fmt.Printf("OathPlate Calculator %s\n\n", version)
-
-	// Inform about cache if present
-	if c, ok := loadCache(); ok && !c.State.FetchedAt.IsZero() {
-		age := time.Since(c.State.FetchedAt)
-		fresh := age <= cacheTTL
-		fmt.Printf("Cache: %s (age %s, %s)\n",
-			c.State.FetchedAt.Local().Format("2006-01-02 15:04:05"),
-			roundDuration(age),
-			boolWord(fresh, "fresh", "stale"),
-		)
-		fmt.Println()
+	state := defaultState()
+	if c, ok := loadCache(); ok {
+		state = c.State
 	}
 
-	state := startupMenu(reader)
-
-	// First render
-	rep := ComputeReport(state)
-	RenderReport(rep)
-
-	// Command loop
-	for {
-		fmt.Println()
-		line := readLine(reader, "Command (fetch, calc, show, set <field> <value>, quit): ")
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		parts := strings.Fields(line)
-		switch strings.ToLower(parts[0]) {
-		case "quit", "exit", "q":
-			return
-
-		case "show":
-			RenderReport(ComputeReport(state))
-
-		case "calc":
-			rep := ComputeReport(state)
-			RenderReport(rep)
-
-		case "fetch":
-			s, err := FetchStateFromAPI()
-			if err != nil {
-				fmt.Println("Fetch failed:", err)
-				continue
-			}
-			state = s
-			_ = saveCache(state)
-			fmt.Println("Prices refreshed and cached.")
-			RenderReport(ComputeReport(state))
-
-		case "set":
-			// Manual override of a single field: shale/shard/armor1/armor2/armor3
-			// Example: set shale 125k
-			// Example: set armor2.avg 3.2m
-			if len(parts) < 3 {
-				fmt.Println("Usage: set shale|shard|armor1|armor2|armor3 <value>  OR set armor2.low <value>")
-				continue
-			}
-			field := strings.ToLower(parts[1])
-			valStr := strings.Join(parts[2:], "")
-			val, err := parseGP(valStr)
-			if err != nil || val < 0 {
-				fmt.Println("Invalid GP amount. Examples: 125k, 1.25m, 2b, 1,250,000")
-				continue
-			}
-			if err := ApplyManualSet(&state, field, val); err != nil {
-				fmt.Println("Set failed:", err)
-				continue
-			}
-			state.Mode = "manual"
-			fmt.Println("Updated.")
-			RenderReport(ComputeReport(state))
-
-		default:
-			fmt.Println("Unknown command.")
-		}
+	if err := RunTUI(state); err != nil {
+		fmt.Println("TUI ERROR:", err)
 	}
 }
 
-/*
-   STARTUP
-*/
-
-func startupMenu(reader *bufio.Reader) AppState {
-	for {
-		fmt.Println("Startup Menu")
-		fmt.Println("  1) Manual input")
-		fmt.Println("  2) Fetch prices (and cache)")
-		fmt.Println("  3) Quit")
-		fmt.Println()
-
-		line := strings.ToLower(strings.TrimSpace(readLine(reader, "Choose 1/2/3 or type input/fetch/quit: ")))
-
-		switch line {
-		case "1", "input":
-			return ManualState(reader)
-		case "2", "fetch":
-			s, err := FetchStateFromAPI()
-			if err != nil {
-				fmt.Println("Fetch failed:", err)
-				fmt.Println("Falling back to manual input.")
-				return ManualState(reader)
-			}
-			_ = saveCache(s)
-			return s
-		case "3", "quit", "exit", "q":
-			os.Exit(0)
-		default:
-			fmt.Println("Invalid choice.")
-		}
-	}
-}
-
-func ManualState(reader *bufio.Reader) AppState {
-	fmt.Println("Manual input supports: 125k, 1.25m, 1,250,000")
-	fmt.Println("For manual mode, you will enter a single number; it will be used as high/low/avg.")
-
-	shale := readGP(reader, "Infernal Shale price: ")
-	shard := readGP(reader, "Oathplate Shards price: ")
-
-	a1 := readGP(reader, "Armor piece 1 sale price: ")
-	a2 := readGP(reader, "Armor piece 2 sale price: ")
-	a3 := readGP(reader, "Armor piece 3 sale price: ")
-
+func defaultState() AppState {
 	return AppState{
-		Shale: PriceTriple{High: shale, Low: shale, Avg: shale},
-		Shard: PriceTriple{High: shard, Low: shard, Avg: shard},
 		Armors: []ArmorOption{
-			{Name: "Oathplate Helmet", ItemID: armorID1, Price: PriceTriple{High: a1, Low: a1, Avg: a1}},
-			{Name: "Oathplate Chestplate", ItemID: armorID2, Price: PriceTriple{High: a2, Low: a2, Avg: a2}},
-			{Name: "Oathplate Legs", ItemID: armorID3, Price: PriceTriple{High: a3, Avg: a3}},
+			{Name: "Oathplate Helmet", ItemID: armorID1},
+			{Name: "Oathplate Chestplate", ItemID: armorID2},
+			{Name: "Oathplate Legs", ItemID: armorID3},
 		},
-		FetchedAt: time.Now(),
-		Mode:      "manual",
+		Mode: "manual",
 	}
 }
 
@@ -272,9 +156,9 @@ func FetchStateFromAPI() (AppState, error) {
 		Shale: shale,
 		Shard: shard,
 		Armors: []ArmorOption{
-			{Name: "Armor 1", ItemID: armorID1, Price: a1},
-			{Name: "Armor 2", ItemID: armorID2, Price: a2},
-			{Name: "Armor 3", ItemID: armorID3, Price: a3},
+			{Name: "Oathplate Helmet", ItemID: armorID1, Price: a1},
+			{Name: "Oathplate Chestplate", ItemID: armorID2, Price: a2},
+			{Name: "Oathplate Legs", ItemID: armorID3, Price: a3},
 		},
 		FetchedAt: time.Now(),
 		Mode:      "api",
@@ -321,11 +205,12 @@ func fetchLatestTriple(id int) (PriceTriple, error) {
 */
 
 func ComputeReport(state AppState) Report {
-	// cache status (informational)
-	age := time.Since(state.FetchedAt)
+	var age time.Duration
+	if !state.FetchedAt.IsZero() {
+		age = time.Since(state.FetchedAt)
+	}
 	fresh := !state.FetchedAt.IsZero() && age <= cacheTTL
 
-	// ingredient cost at low/avg/high (low means: buy ingredients at low; high means: buy ingredients at high)
 	ingredientCost := PriceTriple{
 		Low:  int64(shaleNeeded)*state.Shale.Low + int64(shardsNeeded)*state.Shard.Low,
 		Avg:  int64(shaleNeeded)*state.Shale.Avg + int64(shardsNeeded)*state.Shard.Avg,
@@ -334,8 +219,7 @@ func ComputeReport(state AppState) Report {
 
 	armorReports := make([]ArmorReport, 0, len(state.Armors))
 	for _, a := range state.Armors {
-		ar := computeArmor(a, ingredientCost)
-		armorReports = append(armorReports, ar)
+		armorReports = append(armorReports, computeArmor(a, ingredientCost))
 	}
 
 	bestByAvg := pickBestByAvgProfit(armorReports)
@@ -347,6 +231,8 @@ func ComputeReport(state AppState) Report {
 		FetchedAt:       state.FetchedAt,
 		CacheAge:        age,
 		CacheFresh:      fresh,
+		Shale:           state.Shale,
+		Shard:           state.Shard,
 		IngredientCost:  ingredientCost,
 		Armors:          armorReports,
 		BestByAvgProfit: bestByAvg,
@@ -355,12 +241,10 @@ func ComputeReport(state AppState) Report {
 }
 
 func computeArmor(a ArmorOption, ingredientCost PriceTriple) ArmorReport {
-	// Profit cases use ingredient cost at AVG by default (typical planning view).
-	// If you want: show profit bands using ingredientCost.Low/Avg/High too (easy extension).
 	cases := []ProfitCase{
-		computeCase("low", a.Price.Low, ingredientCost.Avg),
+		computeCase("low", a.Price.Low, ingredientCost.Low),
 		computeCase("avg", a.Price.Avg, ingredientCost.Avg),
-		computeCase("high", a.Price.High, ingredientCost.Avg),
+		computeCase("high", a.Price.High, ingredientCost.High),
 	}
 
 	best := cases[0]
@@ -380,7 +264,7 @@ func computeArmor(a ArmorOption, ingredientCost PriceTriple) ArmorReport {
 }
 
 func computeCase(label string, salePrice int64, ingredientCost int64) ProfitCase {
-	taxPaid := int64(float64(salePrice) * taxRate)
+	taxPaid := (salePrice * 2) / 100
 	net := salePrice - taxPaid
 	profit := net - ingredientCost
 
@@ -432,53 +316,55 @@ func profitForLabel(a ArmorReport, label string) int64 {
 }
 
 /*
-	RENDER for formatting
+   RENDER (string)
 */
 
-func RenderReport(r Report) {
-	fmt.Println(strings.Repeat("=", 64))
-	fmt.Printf("OathPlate Calculator %s\n", r.Version)
+func RenderReportString(r Report) string {
+	var b strings.Builder
+	w := func(s string, args ...any) { b.WriteString(fmt.Sprintf(s, args...)) }
+
+	b.WriteString(strings.Repeat("=", 64) + "\n")
+	w("OathPlate Calculator %s\n", r.Version)
 
 	if !r.FetchedAt.IsZero() {
-		fmt.Printf("Mode: %s | Fetched: %s | Age: %s (%s)\n",
+		w("Mode: %s | Fetched: %s | Age: %s (%s)\n",
 			r.Mode,
 			r.FetchedAt.Local().Format("2006-01-02 15:04:05"),
 			roundDuration(r.CacheAge),
 			boolWord(r.CacheFresh, "fresh", "stale"),
 		)
 	} else {
-		fmt.Printf("Mode: %s\n", r.Mode)
+		w("Mode: %s\n", r.Mode)
 	}
 
-	fmt.Println(strings.Repeat("-", 64))
+	b.WriteString(strings.Repeat("-", 64) + "\n")
 
-	fmt.Println("PRICES (high / low / avg)")
-	fmt.Printf("  Infernal Shale:   %12s / %12s / %12s gp\n", comma(rng(r, "shale", "high")), comma(rng(r, "shale", "low")), comma(rng(r, "shale", "avg")))
-	fmt.Printf("  Oathplate Shards: %12s / %12s / %12s gp\n", comma(rng(r, "shard", "high")), comma(rng(r, "shard", "low")), comma(rng(r, "shard", "avg")))
-	fmt.Println()
+	b.WriteString("PRICES (high / low / avg)\n")
+	w("  Infernal Shale:   %12s / %12s / %12s gp\n", comma(r.Shale.High), comma(r.Shale.Low), comma(r.Shale.Avg))
+	w("  Oathplate Shards: %12s / %12s / %12s gp\n", comma(r.Shard.High), comma(r.Shard.Low), comma(r.Shard.Avg))
+	b.WriteString("\n")
 
-	fmt.Println("INGREDIENT COST (using shale+shards high/low/avg)")
-	fmt.Printf("  Cost low:  %s gp\n", comma(r.IngredientCost.Low))
-	fmt.Printf("  Cost avg:  %s gp\n", comma(r.IngredientCost.Avg))
-	fmt.Printf("  Cost high: %s gp\n", comma(r.IngredientCost.High))
-	fmt.Println(strings.Repeat("-", 64))
+	b.WriteString("INGREDIENT COST (using shale+shards high/low/avg)\n")
+	w("  Cost low:  %s gp\n", comma(r.IngredientCost.Low))
+	w("  Cost avg:  %s gp\n", comma(r.IngredientCost.Avg))
+	w("  Cost high: %s gp\n", comma(r.IngredientCost.High))
+	b.WriteString(strings.Repeat("-", 64) + "\n")
 
-	// Sort armor reports by avg profit descending for readability
 	armors := append([]ArmorReport(nil), r.Armors...)
 	sort.Slice(armors, func(i, j int) bool {
 		return profitForLabel(armors[i], "avg") > profitForLabel(armors[j], "avg")
 	})
 
-	fmt.Println("ARMOR OPTIONS (sale high / low / avg) + profit using AVG ingredient cost")
+	b.WriteString("ARMOR OPTIONS (sale high / low / avg) + profit using matching ingredient cost tier\n")
 	for _, a := range armors {
-		fmt.Printf("\n  %s\n", a.Name)
-		fmt.Printf("    Sale:  %12s / %12s / %12s gp\n", comma(a.Sale.High), comma(a.Sale.Low), comma(a.Sale.Avg))
+		w("\n  %s\n", a.Name)
+		w("    Sale:  %12s / %12s / %12s gp\n", comma(a.Sale.High), comma(a.Sale.Low), comma(a.Sale.Avg))
 		for _, c := range a.Cases {
 			sign := ""
 			if c.Profit < 0 {
 				sign = "-"
 			}
-			fmt.Printf("    Profit @ %-4s sale: %s%s gp (tax %s, net %s)\n",
+			w("    Profit @ %-4s sale: %s%s gp (tax %s, net %s)\n",
 				c.SaleLabel,
 				sign, comma(abs(c.Profit)),
 				comma(c.TaxPaid),
@@ -487,47 +373,19 @@ func RenderReport(r Report) {
 		}
 	}
 
-	fmt.Println("\n" + strings.Repeat("-", 64))
-	fmt.Println("RECOMMENDATION")
-	fmt.Printf("  Best by AVG profit: %s (avg profit %s gp)\n",
+	b.WriteString("\n" + strings.Repeat("-", 64) + "\n")
+	b.WriteString("RECOMMENDATION\n")
+	w("  Best by AVG profit: %s (avg profit %s gp)\n",
 		r.BestByAvgProfit.Name,
-		comma(abs(profitForLabel(r.BestByAvgProfit, "avg"))*int64(signum(profitForLabel(r.BestByAvgProfit, "avg")))),
+		comma(profitForLabel(r.BestByAvgProfit, "avg")),
 	)
-	fmt.Printf("  Highest sale HIGH:  %s (high sale %s gp)\n",
+	w("  Highest sale HIGH:  %s (high sale %s gp)\n",
 		r.BestByHighSale.Name,
 		comma(r.BestByHighSale.Sale.High),
 	)
-	fmt.Println(strings.Repeat("=", 64))
-}
+	b.WriteString(strings.Repeat("=", 64) + "\n")
 
-func rng(r Report, item, which string) int64 {
-	switch item {
-	case "shale":
-		return pickTriple(r, rVal{r.IngredientCost, AppState{}.Shale}, which, 1) // unused path
-	case "shard":
-		return pickTriple(r, rVal{r.IngredientCost, AppState{}.Shard}, which, 2)
-	default:
-		return 0
-	}
-}
-
-// (small hack avoided: easier to just access state values directly in render)
-// Instead, keep render simple:
-type rVal struct {
-	cost  PriceTriple
-	price PriceTriple
-}
-
-func pickTriple(_ Report, v rVal, which string, _ int) int64 {
-	// This helper is intentionally unused for cost; kept for future extension.
-	switch which {
-	case "high":
-		return v.price.High
-	case "low":
-		return v.price.Low
-	default:
-		return v.price.Avg
-	}
+	return b.String()
 }
 
 /*
@@ -535,24 +393,19 @@ func pickTriple(_ Report, v rVal, which string, _ int) int64 {
 */
 
 func ApplyManualSet(state *AppState, field string, val int64) error {
-	// Supports:
-	// set shale 123k (sets high/low/avg)
-	// set shard 123k
-	// set armor1 3m (sets all)
-	// set armor2.low 2.9m (sets just low)
 	parts := strings.Split(field, ".")
 	target := parts[0]
 	component := ""
 	if len(parts) == 2 {
-		component = parts[1] // low/avg/high
+		component = parts[1]
 	} else if len(parts) > 2 {
 		return errors.New("invalid field format")
 	}
 
-	setTriple := func(t *PriceTriple) {
+	setTriple := func(t *PriceTriple) error {
 		if component == "" {
 			t.High, t.Low, t.Avg = val, val, val
-			return
+			return nil
 		}
 		switch component {
 		case "high":
@@ -562,32 +415,29 @@ func ApplyManualSet(state *AppState, field string, val int64) error {
 		case "avg":
 			t.Avg = val
 		default:
-			// ignore
+			return fmt.Errorf("unknown component %q (use high|low|avg)", component)
 		}
-		// if any component changed, keep avg consistent only if user is setting all.
+		return nil
 	}
 
 	switch target {
 	case "shale":
-		setTriple(&state.Shale)
-		return nil
+		return setTriple(&state.Shale)
 	case "shard":
-		setTriple(&state.Shard)
-		return nil
+		return setTriple(&state.Shard)
 	case "armor1", "armor2", "armor3":
 		idx := map[string]int{"armor1": 0, "armor2": 1, "armor3": 2}[target]
 		if len(state.Armors) < 3 {
 			return errors.New("armor list not initialized")
 		}
-		setTriple(&state.Armors[idx].Price)
-		return nil
+		return setTriple(&state.Armors[idx].Price)
 	default:
 		return errors.New("unknown field (use shale, shard, armor1, armor2, armor3)")
 	}
 }
 
 /*
-	CACHE
+   CACHE
 */
 
 func loadCache() (CacheFile, bool) {
@@ -612,26 +462,8 @@ func saveCache(state AppState) error {
 }
 
 /*
-	INPUT PARSING
+   INPUT PARSING
 */
-
-func readGP(reader *bufio.Reader, prompt string) int64 {
-	for {
-		line := readLine(reader, prompt)
-		value, err := parseGP(line)
-		if err != nil || value < 0 {
-			fmt.Println("Please enter a valid GP amount (supports k, m, b).")
-			continue
-		}
-		return value
-	}
-}
-
-func readLine(reader *bufio.Reader, prompt string) string {
-	fmt.Print(prompt)
-	line, _ := reader.ReadString('\n')
-	return strings.TrimSpace(line)
-}
 
 func parseGP(input string) (int64, error) {
 	input = strings.TrimSpace(strings.ToLower(input))
@@ -706,15 +538,4 @@ func abs(n int64) int64 {
 		return -n
 	}
 	return n
-}
-
-func signum(n int64) int {
-	switch {
-	case n < 0:
-		return -1
-	case n > 0:
-		return 1
-	default:
-		return 0
-	}
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -87,14 +88,14 @@ func RunTUI(initial AppState) error {
 		header.SetText(fmt.Sprintf("OathPlate Calculator %s — %s", rep.Version, strings.ToUpper(rep.Mode)))
 		results.SetText(RenderReportString(rep))
 
-		if !state.FetchedAt.IsZero() {
+		// Don't overwrite an "Applied ..." message during manual entry.
+		// Only show fetch age when the current state came from a fetch.
+		if state.Mode == "fetch" && !state.FetchedAt.IsZero() {
 			age := time.Since(state.FetchedAt)
 			setStatus(fmt.Sprintf("Fetched: %s | Age: %s | TTL: 20m",
 				state.FetchedAt.Local().Format("2006-01-02 15:04:05"),
 				roundDuration(age),
 			))
-		} else {
-			setStatus("Manual state (no fetch time)")
 		}
 
 		// keep inputs in sync with state (avg)
@@ -107,45 +108,46 @@ func RunTUI(initial AppState) error {
 		}
 	}
 
-	apply := func(field, text string) {
+	apply := func(field, text string) bool {
 		v, err := parseGP(text)
 		if err != nil {
-			setStatus(fmt.Sprintf("[red]Invalid value[-] for %s. Use 125k, 1.25m, 1,250,000.", field))
-			return
+			setStatus(fmt.Sprintf("[red]Invalid[-] %s (try 125k, 1.25m, 1,250,000)", field))
+			return false
 		}
 		if err := ApplyManualSet(&state, field, v); err != nil {
 			setStatus(fmt.Sprintf("[red]Set failed[-]: %v", err))
-			return
+			return false
 		}
 		state.Mode = "manual"
 		refresh()
-		setStatus(fmt.Sprintf("[green]Updated[-] %s", field))
+		setStatus(fmt.Sprintf("[green]Applied[-] %s = %s", field, formatGPShort(v)))
+		return true
 	}
 
 	// Enter-to-apply
 	inShale.SetDoneFunc(func(k tcell.Key) {
-		if k == tcell.KeyEnter {
-			apply("shale.avg", inShale.GetText())
+		if k == tcell.KeyEnter && apply("shale.avg", inShale.GetText()) {
+			app.SetFocus(inShard)
 		}
 	})
 	inShard.SetDoneFunc(func(k tcell.Key) {
-		if k == tcell.KeyEnter {
-			apply("shard.avg", inShard.GetText())
+		if k == tcell.KeyEnter && apply("shard.avg", inShard.GetText()) {
+			app.SetFocus(inA1)
 		}
 	})
 	inA1.SetDoneFunc(func(k tcell.Key) {
-		if k == tcell.KeyEnter {
-			apply("armor1.avg", inA1.GetText())
+		if k == tcell.KeyEnter && apply("armor1.avg", inA1.GetText()) {
+			app.SetFocus(inA2)
 		}
 	})
 	inA2.SetDoneFunc(func(k tcell.Key) {
-		if k == tcell.KeyEnter {
-			apply("armor2.avg", inA2.GetText())
+		if k == tcell.KeyEnter && apply("armor2.avg", inA2.GetText()) {
+			app.SetFocus(inA3)
 		}
 	})
 	inA3.SetDoneFunc(func(k tcell.Key) {
-		if k == tcell.KeyEnter {
-			apply("armor3.avg", inA3.GetText())
+		if k == tcell.KeyEnter && apply("armor3.avg", inA3.GetText()) {
+			app.SetFocus(inShale) // wrap
 		}
 	})
 
@@ -241,4 +243,17 @@ func RunTUI(initial AppState) error {
 
 	refresh()
 	return app.SetRoot(root, true).Run()
+}
+
+func formatGPShort(v int64) string {
+	switch {
+	case v >= 1_000_000_000:
+		return fmt.Sprintf("%.2fb", float64(v)/1_000_000_000)
+	case v >= 1_000_000:
+		return fmt.Sprintf("%.2fm", float64(v)/1_000_000)
+	case v >= 1_000:
+		return fmt.Sprintf("%.2fk", float64(v)/1_000)
+	default:
+		return strconv.FormatInt(v, 10)
+	}
 }
