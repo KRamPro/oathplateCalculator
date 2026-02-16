@@ -51,7 +51,7 @@ func RunTUI(initial AppState) error {
 	tview.Styles.MoreContrastBackgroundColor = tcell.ColorBlack
 	tview.Styles.PrimaryTextColor = tcell.ColorWhite
 	tview.Styles.BorderColor = tcell.ColorGray
-	tview.Styles.SecondaryTextColor = tcell.ColorWhite
+	tview.Styles.SecondaryTextColor = tcell.ColorBlack
 
 	state := initial
 
@@ -68,6 +68,7 @@ func RunTUI(initial AppState) error {
 	results.SetBorder(true)
 	results.SetTitle("Report")
 	results.SetBackgroundColor(tcell.ColorBlack)
+	results.SetBorderColor(tcell.ColorRed)
 
 	status := tview.NewTextView()
 	status.SetDynamicColors(true)
