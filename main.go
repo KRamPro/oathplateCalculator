@@ -19,7 +19,7 @@ const (
 	cacheFile    = "prices_cache.json"
 	cacheTTL     = 20 * time.Minute
 
-	version = "v1.0.0"
+	version = "v2.0.0"
 )
 
 const (
